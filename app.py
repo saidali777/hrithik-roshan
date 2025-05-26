@@ -2,8 +2,8 @@ import logging
 import os
 
 from flask import Flask, request
-from telegram import Update
-from telegram.ext import ApplicationBuilder, ChatJoinRequestHandler, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, ChatJoinRequestHandler, ContextTypes, CommandHandler
 from telegram.constants import ParseMode
 
 # --- Logging Setup ---
@@ -32,6 +32,24 @@ async def auto_approve_join_request(update: Update, context: ContextTypes.DEFAUL
         except Exception as e:
             logger.error(f"Failed to send welcome message: {e}")
 
+# --- Start Command Handler ---
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    bot_username = context.bot.username
+    keyboard = [
+        [InlineKeyboardButton("➕ Add Bot to Group", url=f"https://t.me/{bot_username}?startgroup=true")],
+        [InlineKeyboardButton("👥 Support Group", url="https://t.me/colonel_support")],
+        [InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/YOUR_USERNAME_HERE")]  # Replace with your Telegram username
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    intro_text = (
+        "👋 Hello! I'm your friendly auto-pending request approver bot.\n\n"
+        "✅ Add me to any group with join request approval enabled, and I’ll automatically approve pending users!\n\n"
+        "Use the buttons below to get started:"
+    )
+
+    await update.message.reply_text(intro_text, reply_markup=reply_markup)
+
 # --- Build Telegram Application ---
 bot_token = os.getenv("BOT_TOKEN")
 if not bot_token:
@@ -39,6 +57,7 @@ if not bot_token:
 
 application = ApplicationBuilder().token(bot_token).build()
 application.add_handler(ChatJoinRequestHandler(auto_approve_join_request))
+application.add_handler(CommandHandler("start", start))
 
 # --- Flask App ---
 app = Flask(__name__)
