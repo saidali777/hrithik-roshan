@@ -12,7 +12,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# --- Flask App Setup ---
+# --- Flask App Setup (CRITICAL: Define 'app' here) ---
+# This line MUST be at the top-level of your module, outside any functions.
 app = Flask(__name__)
 
 # --- Telegram Bot Logic ---
@@ -31,19 +32,8 @@ async def auto_approve_join_request(update: Update, context: ContextTypes.DEFAUL
         except Exception as e:
             logger.error(f"Failed to send welcome message: {e}")
 
-# --- Main Webhook Endpoint ---
-@app.route("/", methods=["POST"])
-async def telegram_webhook():
-    """Handle incoming Telegram updates via webhook."""
-    application = _get_telegram_application()
-    if not application:
-        return "Bot not configured", 500
-
-    update = Update.de_json(request.get_json(force=True), application.bot)
-    await application.process_update(update)
-    return "ok"
-
 # --- Telegram Application Initialization (Helper Function) ---
+# This function is now called within the webhook route.
 def _get_telegram_application():
     """Initializes and configures the Telegram Application."""
     bot_token = os.environ.get('BOT_TOKEN')
@@ -55,14 +45,22 @@ def _get_telegram_application():
     application.add_handler(ChatJoinRequestHandler(auto_approve_join_request))
     return application
 
-# --- Entry Point for Deployment ---
-if __name__ == '__main__':
-    # >>> MODIFICATION HERE <<<
-    # It's best practice to use the PORT environment variable provided by the platform.
-    # If the platform *guarantees* it will always be 8000, you can hardcode.
-    # Otherwise, rely on the env var.
-    # Using 8000 as a fallback IF PORT isn't set, which it will be on Koyeb/Heroku
-    port = int(os.environ.get("PORT", 8000)) # Change default fallback to 8000 if PORT is not set
+# --- Main Webhook Endpoint ---
+@app.route("/", methods=["POST"])
+async def telegram_webhook():
+    """Handle incoming Telegram updates via webhook."""
+    application = _get_telegram_application() # Initialize application here
+    if not application:
+        return "Bot not configured", 500
 
-    logger.info(f"Starting Flask app on port {port}")
-    app.run(host="0.0.0.0", port=port)
+    update = Update.de_json(request.get_json(force=True), application.bot)
+    await application.process_update(update)
+    return "ok"
+
+# --- Entry Point for Local Development (Gunicorn handles this in production) ---
+# This block is only executed when you run `python bot.py` directly.
+# Gunicorn bypasses this when it loads `bot:app`.
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 8000))
+    logger.info(f"Starting Flask app on port {port} for local development")
+    app.run(host="0.0.0.0", port=port, debug=True) # Added debug=True for local testing
