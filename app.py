@@ -118,7 +118,7 @@ async def accept(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # Bot token from environment
-bot_token = os.getenv("BOT_TOKEN")
+bot_token = os.getenv("7611125537:AAGLicQpwAEMVwFTXoTPOYjLC5qGjvEcg94")
 if not bot_token:
     raise RuntimeError("BOT_TOKEN environment variable not set.")
 
