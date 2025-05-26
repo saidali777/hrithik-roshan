@@ -1,139 +1,106 @@
-import logging
 import os
-import asyncio
-import threading
-from flask import Flask, request
+import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.constants import ParseMode
 from telegram.ext import (
     ApplicationBuilder,
     ContextTypes,
     ChatJoinRequestHandler,
     CommandHandler,
 )
+from telegram.constants import ParseMode
 
-# --- Logging Setup ---
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
-)
+# Logging setup
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- Data Stores ---
+# Global store
 pending_requests = {}
 auto_accept_chats = set()
 
-# --- Handlers ---
-async def auto_approve_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.chat_join_request:
+# Start command
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    bot_username = context.bot.username
+    keyboard = [
+        [InlineKeyboardButton("➕ Add Bot to Group", url=f"https://t.me/{bot_username}?startgroup=true")],
+        [InlineKeyboardButton("👥 Support Group", url="https://t.me/colonel_support")],
+        [InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/YOUR_USERNAME_HERE")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(
+        "👋 Hello! I'm your friendly auto-join request approval bot.\n\n"
+        "✅ Add me to groups and use /accept to auto-approve join requests.",
+        reply_markup=reply_markup,
+    )
+
+# Accept command
+async def accept(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat = update.effective_chat
+    if chat.type not in ["group", "supergroup"]:
+        await update.message.reply_text("❌ Use this in a group.")
         return
 
+    bot_member = await context.bot.get_chat_member(chat.id, context.bot.id)
+    if not bot_member.can_invite_users:
+        await update.message.reply_text("❌ I need 'Invite Users' permission.")
+        return
+
+    auto_accept_chats.add(chat.id)
+    count = 0
+
+    if chat.id in pending_requests:
+        for req in pending_requests[chat.id][:]:
+            try:
+                await req.approve()
+                count += 1
+                user = req.from_user
+                await context.bot.send_message(
+                    chat_id=chat.id,
+                    text=f"✅ Welcome, {user.mention_html()}!",
+                    parse_mode=ParseMode.HTML,
+                )
+                pending_requests[chat.id].remove(req)
+            except Exception as e:
+                logger.error(f"Failed to approve: {e}")
+
+    await update.message.reply_text(f"✅ Auto-accept enabled. Approved {count} pending requests.")
+
+# Join request handler
+async def auto_approve_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.chat_join_request.chat.id
     user = update.chat_join_request.from_user
 
-    # Store join request
     if chat_id not in pending_requests:
         pending_requests[chat_id] = []
     pending_requests[chat_id].append(update.chat_join_request)
-
-    logger.info(f"Join request from {user.id} in chat {chat_id} received.")
+    logger.info(f"Join request from {user.id} in chat {chat_id}")
 
     if chat_id in auto_accept_chats:
         try:
             await update.chat_join_request.approve()
             await context.bot.send_message(
                 chat_id=chat_id,
-                text=f"Welcome, {user.mention_html()}! Your join request has been approved.",
+                text=f"✅ Welcome, {user.mention_html()}!",
                 parse_mode=ParseMode.HTML,
             )
             pending_requests[chat_id].remove(update.chat_join_request)
-            logger.info(f"Auto-approved join request from {user.id} in chat {chat_id}.")
         except Exception as e:
-            logger.error(f"Failed to auto-approve join request from {user.id}: {e}")
+            logger.error(f"Approval failed: {e}")
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    bot_username = context.bot.username
-    keyboard = [
-        [InlineKeyboardButton("➕ Add Bot to Group", url=f"https://t.me/{bot_username}?startgroup=true")],
-        [InlineKeyboardButton("👥 Support Group", url="https://t.me/colonel_support")],
-        [InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/YOUR_USERNAME_HERE")],  # Replace this
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+# Entry point
+if __name__ == "__main__":
+    token = os.getenv("BOT_TOKEN")
+    if not token:
+        raise RuntimeError("BOT_TOKEN not set")
 
-    intro_text = (
-        "👋 Hello! I'm your friendly auto-join request approval bot.\n\n"
-        "✅ Add me to groups with join requests enabled and I can automatically approve users!\n\n"
-        "Use /accept command in a group to start auto-approving all pending join requests instantly.\n\n"
-        "Use the buttons below to add me or visit support."
+    app = ApplicationBuilder().token(token).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("accept", accept))
+    app.add_handler(ChatJoinRequestHandler(auto_approve_join_request))
+
+    # Run webhook server on Koyeb
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=int(os.getenv("PORT", "8080")),
+        webhook_url=os.getenv("WEBHOOK_URL"),
     )
-
-    await update.message.reply_text(intro_text, reply_markup=reply_markup)
-
-async def accept(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat = update.effective_chat
-
-    if chat.type not in ["group", "supergroup"]:
-        await update.message.reply_text("❌ This command can only be used in groups.")
-        return
-
-    bot_member = await context.bot.get_chat_member(chat.id, context.bot.id)
-    if not bot_member.can_invite_users:
-        await update.message.reply_text(
-            "❌ I need 'Invite Users' permission to approve join requests. Please promote me as admin with full rights."
-        )
-        return
-
-    auto_accept_chats.add(chat.id)
-
-    count = 0
-    if chat.id in pending_requests:
-        for join_request in pending_requests[chat.id][:]:
-            try:
-                await join_request.approve()
-                user = join_request.from_user
-                await context.bot.send_message(
-                    chat_id=chat.id,
-                    text=f"✅ Welcome, {user.mention_html()}!",
-                    parse_mode=ParseMode.HTML,
-                )
-                pending_requests[chat.id].remove(join_request)
-                count += 1
-            except Exception as e:
-                logger.error(f"Error approving join request for user {join_request.from_user.id}: {e}")
-
-    await update.message.reply_text(f"✅ Auto-accept enabled.\nApproved {count} pending requests.")
-
-# --- Flask + Telegram App Setup ---
-bot_token = os.getenv("BOT_TOKEN")
-if not bot_token:
-    raise RuntimeError("BOT_TOKEN environment variable not set.")
-
-application = ApplicationBuilder().token(bot_token).build()
-application.add_handler(ChatJoinRequestHandler(auto_approve_join_request))
-application.add_handler(CommandHandler("start", start))
-application.add_handler(CommandHandler("accept", accept))
-
-# --- Flask App ---
-app = Flask(__name__)
-
-@app.route("/")
-def index():
-    return "🤖 Telegram bot is running!", 200
-
-@app.route("/webhook", methods=["POST"])
-async def webhook():
-    try:
-        update = Update.de_json(request.get_json(force=True), application.bot)
-        await application.update_queue.put(update)
-        return "OK", 200
-    except Exception as e:
-        logger.error(f"Webhook error: {e}")
-        return "Webhook error", 500
-
-# --- Start Telegram Application in Background ---
-def run_telegram():
-    asyncio.run(application.initialize())
-    application.post_init()
-    application.start()
-
-threading.Thread(target=run_telegram).start()
