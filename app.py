@@ -9,15 +9,12 @@ from telegram.ext import (
 )
 from telegram.constants import ParseMode
 
-# Logging setup
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Global store
 pending_requests = {}
 auto_accept_chats = set()
 
-# Start command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bot_username = context.bot.username
     keyboard = [
@@ -33,7 +30,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=reply_markup,
     )
 
-# Accept command
 async def accept(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     if chat.type not in ["group", "supergroup"]:
@@ -65,7 +61,6 @@ async def accept(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(f"✅ Auto-accept enabled. Approved {count} pending requests.")
 
-# Join request handler
 async def auto_approve_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.chat_join_request.chat.id
     user = update.chat_join_request.from_user
@@ -73,6 +68,7 @@ async def auto_approve_join_request(update: Update, context: ContextTypes.DEFAUL
     if chat_id not in pending_requests:
         pending_requests[chat_id] = []
     pending_requests[chat_id].append(update.chat_join_request)
+
     logger.info(f"Join request from {user.id} in chat {chat_id}")
 
     if chat_id in auto_accept_chats:
@@ -87,7 +83,6 @@ async def auto_approve_join_request(update: Update, context: ContextTypes.DEFAUL
         except Exception as e:
             logger.error(f"Approval failed: {e}")
 
-# Entry point
 if __name__ == "__main__":
     token = os.getenv("BOT_TOKEN")
     if not token:
@@ -98,7 +93,6 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("accept", accept))
     app.add_handler(ChatJoinRequestHandler(auto_approve_join_request))
 
-    # Run webhook server on Koyeb
     app.run_webhook(
         listen="0.0.0.0",
         port=int(os.getenv("PORT", "8080")),
